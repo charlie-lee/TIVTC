@@ -249,10 +249,11 @@ PVideoFrame __stdcall TFM::GetFrame(int n, IScriptEnvironment* env)
           // compare combing artifacts between fmatch (better one between {c,p} & n)
           // tmatch may be overriden by a less combed frame (fmatch or scndT (n))
           checkmm(tmatch, fmatch, scndT, dst, dfrm, tmp, tfrm, prv, src, nxt, env, vi, n, blockN, xblocks, mics);
+        // new frame dst = {fmatch's top, c's bottom}; why not tmatch?
         createWeaveFrame(dst, prv, src, nxt, env, fmatch, dfrm, vi); // 2nd time
       }
       else tmatch = scndT;
-      if (tmatch == scndT)
+      if (tmatch == scndT) // if tmatch == newly compared frame
       {
         if (mode > 3)
         {
