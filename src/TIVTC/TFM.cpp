@@ -23,7 +23,6 @@
 **   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
-#include <cstring>
 #include "TFM.h"
 #include "TFMasm.h"
 #include "TCommonASM.h"
@@ -52,21 +51,22 @@ PVideoFrame __stdcall TFM::GetFrame(int n, IScriptEnvironment* env)
   MI = MI_origSaved;
   getSettingOvr(n); // process overrides
   if (order == -1) order = child->GetParity(n) ? 1 : 0;
-  if (field == -1) field = order;
-  int frstT = field^order ? 2 : 0;
-  int scndT = (mode == 2 || mode == 6) ? (field^order ? 3 : 4) : (field^order ? 0 : 2);
+  if (field == -1) field = order; // 0: bff, 1: tff
+  int frstT = field^order ? 2 : 0; // field == order (default), 1st frame: p
+  int scndT = (mode == 2 || mode == 6) ? (field^order ? 3 : 4) : (field^order ? 0 : 2); // 2nd frame: n
   if (debug)
   {
     sprintf(buf, "TFM:  ----------------------------------------\n");
     OutputDebugString(buf);
   }
+  // override mode
   if (getMatchOvr(n, fmatch, combed, d2vmatch,
     flags == 5 ? checkSceneChange(prv, src, nxt, n) : false))
   {
-    createWeaveFrame(dst, prv, src, nxt, fmatch, dfrm, env, vi);
+    createWeaveFrame(dst, prv, src, nxt, env, fmatch, dfrm, vi);
     if (PP > 0 && combed == -1)
     {
-      if (checkCombed(dst, n, vi, fmatch, blockN, xblocks, mics, false, chroma, cthresh))
+      if (checkCombed(dst, n, env, vi, fmatch, blockN, xblocks, mics, false, chroma, cthresh))
       {
         if (d2vmatch)
         {
@@ -86,8 +86,8 @@ PVideoFrame __stdcall TFM::GetFrame(int n, IScriptEnvironment* env)
       {
         if (mics[i] == -20 && (i < 3 || micout > 1))
         {
-          createWeaveFrame(tmp, prv, src, nxt, i, tfrm, env, vi);
-          checkCombed(tmp, n, vi, i, blockN, xblocks, mics, true, chroma, cthresh);
+          createWeaveFrame(tmp, prv, src, nxt, env, i, tfrm, vi);
+          checkCombed(tmp, n, env, vi, i, blockN, xblocks, mics, true, chroma, cthresh);
         }
       }
     }
@@ -131,47 +131,47 @@ PVideoFrame __stdcall TFM::GetFrame(int n, IScriptEnvironment* env)
     lastMatch.combed = combed;
     return dst;
   }
-d2vCJump:
+ d2vCJump: // skip mpeg source (d2v files)
   if (mode == 6)
   {
     int thrdT = field^order ? 0 : 2;
     int frthT = field^order ? 4 : 3;
     tcombed = 0;
-    if (!slow) fmatch = compareFields(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n);
-    else fmatch = compareFieldsSlow(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n);
+    if (!slow) fmatch = compareFields(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n, env);
+    else fmatch = compareFieldsSlow(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n, env);
     if (micmatching > 0)
       checkmm(fmatch, 1, frstT, dst, dfrm, tmp, tfrm, prv, src, nxt, env, vi, n, blockN, xblocks, mics);
-    createWeaveFrame(dst, prv, src, nxt, fmatch, dfrm, env, vi);
-    if (checkCombed(dst, n, vi, fmatch, blockN, xblocks, mics, false, chroma, cthresh))
+    createWeaveFrame(dst, prv, src, nxt, env, fmatch, dfrm, vi);
+    if (checkCombed(dst, n, env, vi, fmatch, blockN, xblocks, mics, false, chroma, cthresh))
     {
       tcombed = 2;
       if (ubsco) isSC = checkSceneChange(prv, src, nxt, n);
-      if (isSC) createWeaveFrame(tmp, prv, src, nxt, scndT, tfrm, env, vi);
-      if (isSC && !checkCombed(tmp, n, vi, scndT, blockN, xblocks, mics, false, chroma, cthresh))
+      if (isSC) createWeaveFrame(tmp, prv, src, nxt, env, scndT, tfrm, vi);
+      if (isSC && !checkCombed(tmp, n, env, vi, scndT, blockN, xblocks, mics, false, chroma, cthresh))
       {
         fmatch = scndT;
         tcombed = 0;
-        copyFrame(dst, tmp, vi);
+        copyFrame(dst, tmp, vi, env);
         dfrm = fmatch;
       }
       else
       {
-        createWeaveFrame(tmp, prv, src, nxt, thrdT, tfrm, env, vi);
-        if (!checkCombed(tmp, n, vi, thrdT, blockN, xblocks, mics, false, chroma, cthresh))
+        createWeaveFrame(tmp, prv, src, nxt, env, thrdT, tfrm, vi);
+        if (!checkCombed(tmp, n, env, vi, thrdT, blockN, xblocks, mics, false, chroma, cthresh))
         {
           fmatch = thrdT;
           tcombed = 0;
-          copyFrame(dst, tmp, vi);
+          copyFrame(dst, tmp, vi, env);
           dfrm = fmatch;
         }
         else
         {
-          if (isSC) createWeaveFrame(tmp, prv, src, nxt, frthT, tfrm, env, vi);
-          if (isSC && !checkCombed(tmp, n, vi, frthT, blockN, xblocks, mics, false, chroma, cthresh))
+          if (isSC) createWeaveFrame(tmp, prv, src, nxt, env, frthT, tfrm, vi);
+          if (isSC && !checkCombed(tmp, n, env, vi, frthT, blockN, xblocks, mics, false, chroma, cthresh))
           {
             fmatch = frthT;
             tcombed = 0;
-            copyFrame(dst, tmp, vi);
+            copyFrame(dst, tmp, vi, env);
             dfrm = fmatch;
           }
         }
@@ -188,59 +188,68 @@ d2vCJump:
     }
     combed = 0;
     bool combed1 = false, combed2 = false;
-    if (!slow) fmatch = compareFields(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n);
-    else fmatch = compareFieldsSlow(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n);
-    createWeaveFrame(dst, prv, src, nxt, 1, dfrm, env, vi);
-    combed1 = checkCombed(dst, n, vi, 1, blockN, xblocks, mics, false, chroma, cthresh);
-    createWeaveFrame(dst, prv, src, nxt, frstT, dfrm, env, vi);
-    combed2 = checkCombed(dst, n, vi, frstT, blockN, xblocks, mics, false, chroma, cthresh);
+    if (!slow) fmatch = compareFields(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n, env);
+    else fmatch = compareFieldsSlow(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n, env);
+    createWeaveFrame(dst, prv, src, nxt, env, 1, dfrm, vi);
+    combed1 = checkCombed(dst, n, env, vi, 1, blockN, xblocks, mics, false, chroma, cthresh);
+    createWeaveFrame(dst, prv, src, nxt, env, frstT, dfrm, vi);
+    combed2 = checkCombed(dst, n, env, vi, frstT, blockN, xblocks, mics, false, chroma, cthresh);
     if (!combed1 && !combed2)
     {
-      createWeaveFrame(dst, prv, src, nxt, fmatch, dfrm, env, vi);
+      createWeaveFrame(dst, prv, src, nxt, env, fmatch, dfrm, vi);
       if (field == 0) mode7_field = 1;
       else mode7_field = 0;
     }
     else if (!combed2 && combed1)
     {
-      createWeaveFrame(dst, prv, src, nxt, frstT, dfrm, env, vi);
+      createWeaveFrame(dst, prv, src, nxt, env, frstT, dfrm, vi);
       mode7_field = 1;
       fmatch = frstT;
     }
     else if (!combed1 && combed2)
     {
-      createWeaveFrame(dst, prv, src, nxt, 1, dfrm, env, vi);
+      createWeaveFrame(dst, prv, src, nxt, env, 1, dfrm, vi);
       mode7_field = 0;
       fmatch = 1;
     }
     else
     {
-      createWeaveFrame(dst, prv, src, nxt, 1, dfrm, env, vi);
+      createWeaveFrame(dst, prv, src, nxt, env, 1, dfrm, vi);
       combed = 2;
       field = mode7_field;
       fmatch = 1;
     }
   }
-  else
+  else // normal modes? (core code)
   {
+    // first compare: c vs. p
+    // compareFields(): match1==1(c: current frame),match2==frstT==0(p),norm1(output)==nmatch1,mtn1(output)==mmatch1
+    // return: frame index (index of c/p/n/u/b)
     if (!slow) 
-      fmatch = compareFields(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n);
-    else 
-      fmatch = compareFieldsSlow(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n);
-    if (micmatching > 0)
+      fmatch = compareFields(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n, env); 
+    else // slow mode (slow == 1 or 2)
+      fmatch = compareFieldsSlow(prv, src, nxt, 1, frstT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n, env); // call corresponding function for different slow values
+    if (micmatching > 0) // default: 1
+      // fmatch: better matched frame; m1==1(c), m2==frstT==0(p); {prv,src,nxt}:p,c,n data; dfrm==tftm==-20(none); mics[5]:-20 as default (5 elements for p,c,n,u,b)
+      // if fmatch has more combing artifacts than the other frame, the fmatch value is replaced
       checkmm(fmatch, 1, frstT, dst, dfrm, tmp, tfrm, prv, src, nxt, env, vi, n, blockN, xblocks, mics);
-    createWeaveFrame(dst, prv, src, nxt, fmatch, dfrm, env, vi);
-    if (mode > 3 || (mode > 0 && checkCombed(dst, n, vi, fmatch, blockN, xblocks, mics, false, chroma, cthresh)))
+    // create weaved frame using fmatch's top field
+    createWeaveFrame(dst, prv, src, nxt, env, fmatch, dfrm, vi); // 1st time
+    if (mode > 3 || (mode > 0 && checkCombed(dst, n, env, vi, fmatch, blockN, xblocks, mics, false, chroma, cthresh))) // if combed
     {
       if (mode < 4) tcombed = 2;
-      if (mode != 2)
+      if (mode != 2) // default: mode == 1 (3-way match, 2nd compare)
       {
-        if (!slow) 
-          tmatch = compareFields(prv, src, nxt, fmatch, scndT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n);
-        else 
-          tmatch = compareFieldsSlow(prv, src, nxt, fmatch, scndT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n);
+          if (!slow) // 2nd field compare: better between {c,p} vs. n (scndT==2)
+          tmatch = compareFields(prv, src, nxt, fmatch, scndT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n, env);
+        else // slow mode
+          // tmatch is the better one among {c,p,n}
+          tmatch = compareFieldsSlow(prv, src, nxt, fmatch, scndT, nmatch1, nmatch2, mmatch1, mmatch2, vi, n, env);
         if (micmatching > 0)
+          // compare combing artifacts between fmatch (better one between {c,p} & n)
+          // tmatch may be overriden by a less combed frame (fmatch or scndT (n))
           checkmm(tmatch, fmatch, scndT, dst, dfrm, tmp, tfrm, prv, src, nxt, env, vi, n, blockN, xblocks, mics);
-        createWeaveFrame(dst, prv, src, nxt, fmatch, dfrm, env, vi);
+        createWeaveFrame(dst, prv, src, nxt, env, fmatch, dfrm, vi); // 2nd time
       }
       else tmatch = scndT;
       if (tmatch == scndT)
@@ -248,64 +257,64 @@ d2vCJump:
         if (mode > 3)
         {
           fmatch = tmatch;
-          createWeaveFrame(dst, prv, src, nxt, fmatch, dfrm, env, vi);
+          createWeaveFrame(dst, prv, src, nxt, env, fmatch, dfrm, vi);
         }
-        else if (mode != 2 || !ubsco || checkSceneChange(prv, src, nxt, n))
+        else if (mode != 2 || !ubsco || checkSceneChange(prv, src, nxt, n)) // default branch
         {
-          createWeaveFrame(tmp, prv, src, nxt, tmatch, tfrm, env, vi);
-          if (!checkCombed(tmp, n, vi, tmatch, blockN, xblocks, mics, false, chroma, cthresh))
+          createWeaveFrame(tmp, prv, src, nxt, env, tmatch, tfrm, vi);
+          if (!checkCombed(tmp, n, env, vi, tmatch, blockN, xblocks, mics, false, chroma, cthresh))
           {
             fmatch = tmatch;
             tcombed = 0;
-            copyFrame(dst, tmp, vi);
+            copyFrame(dst, tmp, vi, env);
             dfrm = fmatch;
           }
         }
       }
-      if ((mode == 3 && tcombed == 2) || (mode == 5 && checkCombed(dst, n, vi, fmatch, blockN, xblocks, mics, false, chroma, cthresh)))
+      if ((mode == 3 && tcombed == 2) || (mode == 5 && checkCombed(dst, n, env, vi, fmatch, blockN, xblocks, mics, false, chroma, cthresh))) // skip
       {
         tcombed = 2;
         if (!ubsco || checkSceneChange(prv, src, nxt, n))
         {
           if (!slow) 
-            tmatch = compareFields(prv, src, nxt, 3, 4, nmatch1, nmatch2, mmatch1, mmatch2, vi, n);
+            tmatch = compareFields(prv, src, nxt, 3, 4, nmatch1, nmatch2, mmatch1, mmatch2, vi, n, env);
           else 
-            tmatch = compareFieldsSlow(prv, src, nxt, 3, 4, nmatch1, nmatch2, mmatch1, mmatch2, vi, n);
+            tmatch = compareFieldsSlow(prv, src, nxt, 3, 4, nmatch1, nmatch2, mmatch1, mmatch2, vi, n, env);
           if (micmatching > 0)
             checkmm(tmatch, 3, 4, dst, dfrm, tmp, tfrm, prv, src, nxt, env, vi, n, blockN, xblocks, mics);
-          createWeaveFrame(tmp, prv, src, nxt, tmatch, tfrm, env, vi);
-          if (!checkCombed(tmp, n, vi, tmatch, blockN, xblocks, mics, false, chroma, cthresh))
+          createWeaveFrame(tmp, prv, src, nxt, env, tmatch, tfrm, vi);
+          if (!checkCombed(tmp, n, env, vi, tmatch, blockN, xblocks, mics, false, chroma, cthresh))
           {
             fmatch = tmatch;
             tcombed = 0;
-            copyFrame(dst, tmp, vi);
+            copyFrame(dst, tmp, vi, env);
             dfrm = fmatch;
           }
           else
-            createWeaveFrame(dst, prv, src, nxt, fmatch, dfrm, env, vi);
+            createWeaveFrame(dst, prv, src, nxt, env, fmatch, dfrm, vi);
         }
       }
-      if (mode == 5 && tcombed == -1) tcombed = 0;
-    }
+      if (mode == 5 && tcombed == -1) tcombed = 0; // skip
+    } // tcombed should be 2 if combed
     if ((mode == 1 || mode == 2 || mode == 3) && tcombed == -1) tcombed = 0;
-    if (combed == -1 && PP > 0) combed = tcombed;
-    if (PP > 0 && combed == -1)
+    if (combed == -1 && PP > 0) combed = tcombed; // combed == 2 if combed & PP == 1
+    if (PP > 0 && combed == -1) // have to be skipped??
     {
-      if (checkCombed(dst, n, vi, fmatch, blockN, xblocks, mics, false, chroma, cthresh)) combed = 2;
+      if (checkCombed(dst, n, env, vi, fmatch, blockN, xblocks, mics, false, chroma, cthresh)) combed = 2;
       else combed = 0;
     }
     if (dfrm != fmatch)
       env->ThrowError("TFM:  internal error (dfrm!=fmatch).  Please report this.\n");
-  }
+  } // normal mode branch over
   if (micout > 0 || (micmatching > 0 && mics[fmatch] > 15 && mode != 7 && !(micmatching == 2 && (mode == 0 || mode == 4))
-    && (!mmsco || checkSceneChange(prv, src, nxt, n))))
-  {
+    && (!mmsco || checkSceneChange(prv, src, nxt, n)))) 
+  {  // enter branch if mode == 1 (default) and have scene change (mmsco==true, checkSceneChange returns true); micout == 0 as default
     for (int i = 0; i < 5; ++i)
     {
       if (mics[i] == -20 && (i < 3 || micout > 1 || micmatching > 0))
       {
-        createWeaveFrame(tmp, prv, src, nxt, i, tfrm, env, vi);
-        checkCombed(tmp, n, vi, i, blockN, xblocks, mics, true, chroma, cthresh);
+        createWeaveFrame(tmp, prv, src, nxt, env, i, tfrm, vi);
+        checkCombed(tmp, n, env, vi, i, blockN, xblocks, mics, true, chroma, cthresh);
       }
     }
     if (micmatching > 0 && mode != 7 && mics[fmatch] > 15 &&
@@ -426,7 +435,7 @@ d2vCJump:
         if (micmatching == 3) { goto othertest; }
       }
     }
-  }
+  } // scene change branch over
   d2vfilm = d2vduplicate(fmatch, combed, n);
   fileOut(fmatch, combed, d2vfilm, n, mics[fmatch], mics);
   if (display) writeDisplay(dst, vi, n, fmatch, combed, false, blockN[fmatch], xblocks,
@@ -471,52 +480,57 @@ d2vCJump:
 
 void TFM::checkmm(int &cmatch, int m1, int m2, PVideoFrame &dst, int &dfrm, PVideoFrame &tmp, int &tfrm,
   PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt, IScriptEnvironment *env, const VideoInfo &vi, int n,
-  int *blockN, int &xblocks, int *mics)
-{
-  if (cmatch != m1)
-  {
-    int tx = m1;
+  int *blockN, int &xblocks, int *mics) 
+{ // checkmm: check micmatching?
+  if (cmatch != m1) // cmatch: result of field compare (default bff: c or p)
+  { 
+    int tx = m1; // swap index of compared frames (make m1 as the matched frame)
     m1 = m2;
     m2 = tx;
   }
-  if (dfrm == m1)
-    checkCombed(dst, n, vi, m1, blockN, xblocks, mics, false, chroma, cthresh);
-  else if (tfrm == m1)
-    checkCombed(tmp, n, vi, m1, blockN, xblocks, mics, false, chroma, cthresh);
-  else
+  if (dfrm == m1) // skip
+    checkCombed(dst, n, env, vi, m1, blockN, xblocks, mics, false, chroma, cthresh);
+  else if (tfrm == m1) // skip
+    checkCombed(tmp, n, env, vi, m1, blockN, xblocks, mics, false, chroma, cthresh);
+  else // default branch
   {
-    if (tfrm != m2)
+    if (tfrm != m2) // default branch
     {
-      createWeaveFrame(tmp, prv, src, nxt, m1, tfrm, env, vi);
-      checkCombed(tmp, n, vi, m1, blockN, xblocks, mics, false, chroma, cthresh);
+      // m1: matched frame; tfrm==-20(input)->m1(output,matched frame)
+      // create new frame tmp = {Xt, cb} using m1's top (matched X frame's top field + current frame's bottom field)
+      createWeaveFrame(tmp, prv, src, nxt, env, m1, tfrm, vi);
+      // check tmp's combing (tmp is weaved using frame m1);
+      // blockN[5]: block index with max MIC value; xblocks: num of 16x16 blocks in the x direction; mics[5]: max number of combed pixels in a 16x16 block
+      checkCombed(tmp, n, env, vi, m1, blockN, xblocks, mics, false, chroma, cthresh);
     }
     else
     {
-      createWeaveFrame(dst, prv, src, nxt, m1, dfrm, env, vi);
-      checkCombed(dst, n, vi, m1, blockN, xblocks, mics, false, chroma, cthresh);
+      createWeaveFrame(dst, prv, src, nxt, env, m1, dfrm, vi);
+      checkCombed(dst, n, env, vi, m1, blockN, xblocks, mics, false, chroma, cthresh);
     }
   }
-  if (mics[m1] < 30)
+  if (mics[m1] < 30) // no strong combing artifact for the weaved frame
     return;
-  if (dfrm == m2)
-    checkCombed(dst, n, vi, m2, blockN, xblocks, mics, false, chroma, cthresh);
-  else if (tfrm == m2)
-    checkCombed(tmp, n, vi, m2, blockN, xblocks, mics, false, chroma, cthresh);
-  else
+  if (dfrm == m2) // skip: dfrm==-20 in default mode
+    checkCombed(dst, n, env, vi, m2, blockN, xblocks, mics, false, chroma, cthresh);
+  else if (tfrm == m2) // skip: tfrm==m1 in default mode
+    checkCombed(tmp, n, env, vi, m2, blockN, xblocks, mics, false, chroma, cthresh);
+  else // default branch if mics[m1]>=30
   {
-    if (tfrm != m1)
+    if (tfrm != m1) // default: tfrm==m1
     {
-      createWeaveFrame(tmp, prv, src, nxt, m2, tfrm, env, vi);
-      checkCombed(tmp, n, vi, m2, blockN, xblocks, mics, false, chroma, cthresh);
+      createWeaveFrame(tmp, prv, src, nxt, env, m2, tfrm, vi);
+      checkCombed(tmp, n, env, vi, m2, blockN, xblocks, mics, false, chroma, cthresh);
     }
-    else
+    else // default branch
     {
-      createWeaveFrame(dst, prv, src, nxt, m2, dfrm, env, vi);
-      checkCombed(dst, n, vi, m2, blockN, xblocks, mics, false, chroma, cthresh);
+      // create new frame dst = {Xt, cb} using m2's top
+      createWeaveFrame(dst, prv, src, nxt, env, m2, dfrm, vi);
+      checkCombed(dst, n, env, vi, m2, blockN, xblocks, mics, false, chroma, cthresh);
     }
   }
   if ((mics[m2] * 3 < mics[m1] || (mics[m2] * 2 < mics[m1] && mics[m1] > MI)) &&
-    abs(mics[m2] - mics[m1]) >= 30 && mics[m2] < MI)
+      abs(mics[m2] - mics[m1]) >= 30 && mics[m2] < MI) // TODO
   {
     if (debug)
     {
@@ -540,14 +554,14 @@ void TFM::micChange(int n, int m1, int m2, PVideoFrame &dst, PVideoFrame &prv,
   }
   fmatch = m2;
   combed = 0;
-  createWeaveFrame(dst, prv, src, nxt, m2, cfrm, env, vi);
+  createWeaveFrame(dst, prv, src, nxt, env, m2, cfrm, vi);
 }
 
 void TFM::writeDisplay(PVideoFrame &dst, const VideoInfo& vi_disp, int n, int fmatch, int combed, bool over,
   int blockN, int xblocks, bool d2vmatch, int *mics, PVideoFrame &prv,
   PVideoFrame &src, PVideoFrame &nxt, IScriptEnvironment *env)
 {
-  if (combed > 1 && PP > 1) return; // TFMPP will display things instead
+  if (combed > 1 && PP > 1) return;
   if (combed > 1 && PP == 1 && blockN != -20)
   {
     drawBox(dst, blockx, blocky, blockN, xblocks, vi_disp);
@@ -612,8 +626,8 @@ void TFM::writeDisplay(PVideoFrame &dst, const VideoInfo& vi_disp, int n, int fm
 // override from ovr file
 void TFM::getSettingOvr(int n)
 {
-  if (setArray.size() == 0) return;
-  for (int x = 0; x < (int)setArray.size(); x += 4)
+  if (setArray == NULL || setArraySize <= 0) return;
+  for (int x = 0; x < setArraySize; x += 4)
   {
     if (n >= setArray[x + 1] && n <= setArray[x + 2])
     {
@@ -630,7 +644,7 @@ bool TFM::getMatchOvr(int n, int &match, int &combed, bool &d2vmatch, bool isSC)
 {
   bool combedset = false;
   d2vmatch = false;
-  if (ovrArray.size() && ovrArray[n] != 255)
+  if (ovrArray != NULL && ovrArray[n] != 255)
   {
     int value = ovrArray[n], temp;
     temp = value & 0x00000020;
@@ -656,7 +670,7 @@ bool TFM::getMatchOvr(int n, int &match, int &combed, bool &d2vmatch, bool isSC)
       return true;
     }
   }
-  if (flags != 0 && flags != 3 && d2vfilmarray.size() && (d2vfilmarray[n] & D2VARRAY_MATCH_MASK))
+  if (flags != 0 && flags != 3 && d2vfilmarray != NULL && (d2vfilmarray[n] & D2VARRAY_MATCH_MASK))
   {
     int ct = (flags == 4 || (flags == 5 && isSC)) ? -1 : 0;
     int temp = d2vfilmarray[n];
@@ -673,7 +687,7 @@ bool TFM::getMatchOvr(int n, int &match, int &combed, bool &d2vmatch, bool isSC)
 
 bool TFM::d2vduplicate(int match, int combed, int n)
 {
-  if (d2vfilmarray.size() == 0 || d2vfilmarray[n] == 0) return false;
+  if (d2vfilmarray == NULL || d2vfilmarray[n] == 0) return false;
   if (n - 1 != lastMatch.frame)
     lastMatch.field = lastMatch.frame = lastMatch.combed = lastMatch.match = -20;
   if ((d2vfilmarray[n] & D2VARRAY_DUP_MASK) == 0x3) // indicates possible top field duplicate
@@ -715,15 +729,15 @@ bool TFM::d2vduplicate(int match, int combed, int n)
 
 void TFM::fileOut(int match, int combed, bool d2vfilm, int n, int MICount, int mics[5])
 {
-  if (moutArray.size() && MICount != -1) moutArray[n] = MICount;
-  if (micout > 0 && moutArrayE.size())
+  if (moutArray && MICount != -1) moutArray[n] = MICount;
+  if (micout > 0 && moutArrayE)
   {
     int sn = micout == 1 ? 3 : 5;
     for (int i = 0; i < sn; ++i)
       moutArrayE[n*sn + i] = mics[i];
   }
-  if (outArray.size() == 0) return;
-  if (output.size() || outputC.size())
+  if (outArray == NULL) return;
+  if (*output || *outputC)
   {
     if (field != fieldO)
     {
@@ -745,34 +759,37 @@ void TFM::fileOut(int match, int combed, bool d2vfilm, int n, int MICount, int m
 }
 
 
-bool TFM::checkCombed(PVideoFrame &src, int n, const VideoInfo &vi, int match,
+bool TFM::checkCombed(PVideoFrame &src, int n, IScriptEnvironment *env, const VideoInfo &vi, int match,
   int *blockN, int &xblocksi, int *mics, bool ddebug, bool chroma, int cthresh)
 {
   if (vi.IsYUY2()) 
-    return checkCombedYUY2(src, n, match, blockN, xblocksi, mics, ddebug, chroma, cthresh);
+    return checkCombedYUY2(src, n, env, match, blockN, xblocksi, mics, ddebug, chroma, cthresh);
   else if (vi.IsY())
-    return checkCombedPlanar(vi, src, n, match, blockN, xblocksi, mics, ddebug, false, cthresh);
+    return checkCombedPlanar(vi, src, n, env, match, blockN, xblocksi, mics, ddebug, false, cthresh);
   else if (vi.IsPlanar())
-    return checkCombedPlanar(vi, src, n, match, blockN, xblocksi, mics, ddebug, chroma, cthresh);
+    // default function
+    return checkCombedPlanar(vi, src, n, env, match, blockN, xblocksi, mics, ddebug, chroma, cthresh);
+  else 
+    env->ThrowError("TFM:  an unknown error occured (unknown colorspace)!");
   return false;
 }
 
 int TFM::compareFields(PVideoFrame& prv, PVideoFrame& src, PVideoFrame& nxt, int match1,
-  int match2, int& norm1, int& norm2, int& mtn1, int& mtn2, const VideoInfo& vi, int n)
+  int match2, int& norm1, int& norm2, int& mtn1, int& mtn2, const VideoInfo& vi, int n,
+  IScriptEnvironment* env)
 {
   if (vi.ComponentSize() == 1)
-    return compareFields_core<uint8_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n);
+    return compareFields_core<uint8_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n, env);
   else
-    return compareFields_core<uint16_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n);
+    return compareFields_core<uint16_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n, env);
 }
 
 
 template<typename pixel_t>
 int TFM::compareFields_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt, int match1,
-  int match2, int &norm1, int &norm2, int &mtn1, int &mtn2, const VideoInfo &vi, int n)
+  int match2, int &norm1, int &norm2, int &mtn1, int &mtn2, const VideoInfo &vi, int n,
+  IScriptEnvironment *env)
 {
-  (void)n;
-
   const int bits_per_pixel = vi.BitsPerComponent();
 
   int ret;
@@ -808,8 +825,8 @@ int TFM::compareFields_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt
     const int startx = vi.IsYUY2() ? 16 : 8 >> vi.GetPlaneWidthSubsampling(plane);
     const int stopx = Width - startx;
 
-    const pixel_t* prvpf = nullptr, * curf = nullptr, * nxtpf = nullptr;
-    int prvf_pitch = 0, curf_pitch = 0, nxtf_pitch = 0;
+    const pixel_t* prvpf, * curf, * nxtpf;
+    int prvf_pitch, curf_pitch, nxtf_pitch;
 
     curf_pitch = src_pitch << 1;
     // exclusion area limits from parameters
@@ -838,7 +855,7 @@ int TFM::compareFields_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt
       prvf_pitch = prv_pitch << 1;
       prvpf = prvp + ((field == 1 ? 1 : 2)*prv_pitch);
     }
-    else if (match1 == 1)
+    else if (match1 == 1) // default for 1st compare (current frame)
     {
       prvf_pitch = src_pitch << 1;
       prvpf = srcp + ((field == 1 ? 1 : 2)*src_pitch);
@@ -862,7 +879,7 @@ int TFM::compareFields_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt
       prvpf = nxtp + ((field == 1 ? 2 : 1)*nxt_pitch);
       mapp = mapp + ((field == 1 ? 2 : 1)*map_pitch);
     }
-    if (match2 == 0)
+    if (match2 == 0) // default for 1st compare
     {
       nxtf_pitch = prv_pitch << 1;
       nxtpf = prvp + ((field == 1 ? 1 : 2)*prv_pitch);
@@ -888,7 +905,7 @@ int TFM::compareFields_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt
       nxtpf = nxtp + ((field == 1 ? 2 : 1)*nxt_pitch);
     }
 
-    const pixel_t* prvnf = prvpf + prvf_pitch;
+    const pixel_t* prvnf = prvpf + prvf_pitch; // 2x pitch
     const pixel_t* curpf = curf - curf_pitch;
     const pixel_t* curnf = curf + curf_pitch;
     const pixel_t* nxtnf = nxtpf + nxtf_pitch;
@@ -896,15 +913,27 @@ int TFM::compareFields_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt
     map_pitch <<= 1;
     uint8_t* mapn = mapp + map_pitch;
 
+    // example: bff + compare(c, p)
+    // frm:       p            c        n
+    // 0t    p0t=nxtppf | c0t=prvppf | 
+    // 1b    p1b=       | c1b=curpf  | 
+    // 2t    p2t=nxtpf  | c2t=prvpf  | 
+    // 3b    p3b=       | c3b=curf   | 
+    // 4t    p4t=nxtnf  | c4t=prvnf  | 
+    // 5b    p5b=       | c5b=curnf  | 
+    // 6t    p6t=nxtnnf | c6t=prvnnf | 
+
     // back to byte pointers
-    if ((match1 >= 3 && field == 1) || (match1 < 3 && field != 1))
+    if ((match1 >= 3 && field == 1) || (match1 < 3 && field != 1)) // default branch for 1st compare
+      // mapp = |c2t-p2t|, mapp[x]={0 for [0,3], 1 for [4,19], 3 for [19,+inf)} (1x1 region for each mapp pixel)
+      // mapp only half height (compute every 2 rows) (bff: for top fields only)
       buildDiffMapPlane2<pixel_t>(
-        reinterpret_cast<const uint8_t*>(prvpf - prvf_pitch),
-        reinterpret_cast<const uint8_t*>(nxtpf - nxtf_pitch),
-        mapp - map_pitch,
+        reinterpret_cast<const uint8_t*>(prvpf - prvf_pitch), // prvppf
+        reinterpret_cast<const uint8_t*>(nxtpf - nxtf_pitch), // nxtppf
+        mapp - map_pitch, // mapp - 2*pitch = |prvppf-nxtppf| (map values: {0,1,3})
         prvf_pitch * sizeof(pixel_t),
         nxtf_pitch * sizeof(pixel_t),
-        map_pitch, Height >> 1, Width, bits_per_pixel);
+        map_pitch, Height >> 1, Width, bits_per_pixel, env); // half width
     else
       buildDiffMapPlane2<pixel_t>(
         reinterpret_cast<const uint8_t*>(prvnf - prvf_pitch),
@@ -912,7 +941,7 @@ int TFM::compareFields_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt
         mapn - map_pitch,
         prvf_pitch * sizeof(pixel_t),
         nxtf_pitch * sizeof(pixel_t),
-        map_pitch, Height >> 1, Width, bits_per_pixel);
+        map_pitch, Height >> 1, Width, bits_per_pixel, env);
 
     const int Const23 = 23 << (bits_per_pixel - 8);
     const int Const42 = 42 << (bits_per_pixel - 8);
@@ -923,7 +952,7 @@ int TFM::compareFields_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt
       {
         for (int x = startx; x < stopx; x += incl)
         {
-          int eax = (mapp[x] << 2) + mapn[x];
+          int eax = (mapp[x] << 2) + mapn[x]; // eax=4*|c2t-p2t|+|c4t-p4t| (approx to {0,1,3})
           if ((eax & 0xFF) == 0)
             continue;
 
@@ -1117,25 +1146,24 @@ int TFM::compareFields_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt
 }
 
 int TFM::compareFieldsSlow(PVideoFrame& prv, PVideoFrame& src, PVideoFrame& nxt, int match1,
-  int match2, int& norm1, int& norm2, int& mtn1, int& mtn2, const VideoInfo& vi, int n)
+  int match2, int& norm1, int& norm2, int& mtn1, int& mtn2, const VideoInfo& vi, int n, IScriptEnvironment* env)
 {
   if (slow == 2) {
     if (vi.ComponentSize() == 1)
-      return compareFieldsSlow2_core<uint8_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n);
+      return compareFieldsSlow2_core<uint8_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n, env);
     else
-      return compareFieldsSlow2_core<uint16_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n);
+      return compareFieldsSlow2_core<uint16_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n, env);
   }
   if (vi.ComponentSize() == 1)
-    return compareFieldsSlow_core<uint8_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n);
+    return compareFieldsSlow_core<uint8_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n, env);
   else
-    return compareFieldsSlow_core<uint16_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n);
+    return compareFieldsSlow_core<uint16_t>(prv, src, nxt, match1, match2, norm1, norm2, mtn1, mtn2, vi, n, env);
 }
 
 template<typename pixel_t>
 int TFM::compareFieldsSlow_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt, int match1,
-  int match2, int &norm1, int &norm2, int &mtn1, int &mtn2, const VideoInfo &vi, int n)
+  int match2, int &norm1, int &norm2, int &mtn1, int &mtn2, const VideoInfo &vi, int n, IScriptEnvironment *env)
 {
-  (void)n;
 
   const int bits_per_pixel = vi.BitsPerComponent();
 
@@ -1175,8 +1203,8 @@ int TFM::compareFieldsSlow_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame 
     const int startx = vi.IsYUY2() ? 16 : 8 >> vi.GetPlaneWidthSubsampling(plane);
     const int stopx = Width - startx;
 
-    const pixel_t* prvpf = nullptr, * curf = nullptr, * nxtpf = nullptr;
-    int prvf_pitch = 0, curf_pitch = 0, nxtf_pitch = 0;
+    const pixel_t* prvpf, * curf, * nxtpf;
+    int prvf_pitch, curf_pitch, nxtf_pitch;
 
     curf_pitch = src_pitch << 1;
 
@@ -1278,7 +1306,7 @@ int TFM::compareFieldsSlow_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame 
           mapp, 
           prvf_pitch * sizeof(pixel_t),
           nxtf_pitch * sizeof(pixel_t),
-          map_pitch, Height, Width, tpitch_current, bits_per_pixel);
+          map_pitch, Height, Width, tpitch_current, bits_per_pixel, env);
       else
         buildDiffMapPlane_Planar<pixel_t>(
           reinterpret_cast<const uint8_t*>(prvnf),
@@ -1286,15 +1314,15 @@ int TFM::compareFieldsSlow_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame 
           mapn, 
           prvf_pitch * sizeof(pixel_t),
           nxtf_pitch * sizeof(pixel_t),
-          map_pitch, Height, Width, tpitch_current, bits_per_pixel);
+          map_pitch, Height, Width, tpitch_current, bits_per_pixel, env);
     }
     else
     { // YUY2
       if constexpr (sizeof(pixel_t) == 1) {
         if ((match1 >= 3 && field == 1) || (match1 < 3 && field != 1))
-          buildDiffMapPlaneYUY2(prvpf, nxtpf, mapp, prvf_pitch, nxtf_pitch, map_pitch, Height, Width, tpitch_current);
+          buildDiffMapPlaneYUY2(prvpf, nxtpf, mapp, prvf_pitch, nxtf_pitch, map_pitch, Height, Width, tpitch_current, env);
         else
-          buildDiffMapPlaneYUY2(prvnf, nxtnf, mapn, prvf_pitch, nxtf_pitch, map_pitch, Height, Width, tpitch_current);
+          buildDiffMapPlaneYUY2(prvnf, nxtnf, mapn, prvf_pitch, nxtf_pitch, map_pitch, Height, Width, tpitch_current, env);
       }
     }
 #ifdef USE_C_NO_ASM
@@ -1483,7 +1511,7 @@ int TFM::compareFieldsSlow_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame 
 #endif
   }
 
-  const unsigned int Const500 = 500 << (bits_per_pixel - 8);
+  const int Const500 = 500 << (bits_per_pixel - 8);
   if (accumPm < Const500 && accumNm < Const500 && (accumPml >= Const500 || accumNml >= Const500) &&
     std::max(accumPml, accumNml) > 3 * std::min(accumPml, accumNml))
   {
@@ -1535,10 +1563,8 @@ int TFM::compareFieldsSlow_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame 
 
 template<typename pixel_t>
 int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame &nxt, int match1,
-  int match2, int &norm1, int &norm2, int &mtn1, int &mtn2, const VideoInfo& vi, int n)
+  int match2, int &norm1, int &norm2, int &mtn1, int &mtn2, const VideoInfo& vi, int n, IScriptEnvironment *env)
 {
-  (void)n;
-
   const int bits_per_pixel = vi.BitsPerComponent();
 
   int ret;
@@ -1555,12 +1581,13 @@ int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame
   norm1 = norm2 = mtn1 = mtn2 = 0;
   
   const int planes[3] = { PLANAR_Y, PLANAR_U, PLANAR_V };
-  for (int b = 0; b < stop; ++b)
+  for (int b = 0; b < stop; ++b) // traverse channels (Y or YUV)
   {
     const int plane = planes[b];
-    uint8_t* mapp = map->GetPtr(b);
+    uint8_t* mapp = map->GetPtr(b); // PlanarFrame* map (new frame?)
     int map_pitch = map->GetPitch(b);
 
+    // prvp: previous plane (channel)
     const pixel_t* prvp = reinterpret_cast<const pixel_t*>(prv->GetReadPtr(plane));
     const int prv_pitch = prv->GetPitch(plane) / sizeof(pixel_t);
 
@@ -1576,21 +1603,21 @@ int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame
     const int startx = vi.IsYUY2() ? 16 : 8 >> vi.GetPlaneWidthSubsampling(plane);
     const int stopx = Width - startx;
 
-    const pixel_t* prvpf = nullptr, * curf = nullptr, * nxtpf = nullptr;
-    int prvf_pitch = 0, curf_pitch = 0, nxtf_pitch = 0;
+    const pixel_t* prvpf, * curf, * nxtpf;
+    int prvf_pitch, curf_pitch, nxtf_pitch;
 
     curf_pitch = src_pitch << 1;
 
     memset(mapp, 0, Height * map_pitch);
 
     // exclusion area limits from parameters
-    if (b == 0)
+    if (b == 0) // Y channel
     {
       y0a = y0;
       y1a = y1;
       tpitch_current = tpitchy;
     }
-    else 
+    else // Cb/Cr
     { 
       const int ysubsampling = vi.GetPlaneHeightSubsampling(plane);
       y0a = y0 >> ysubsampling;
@@ -1601,20 +1628,26 @@ int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame
     if (y0a >= 2) y0a = y0a - 2; // v18: real limit, since y goes only till Height-2
     if (y1a <= Height - 2) y1a = y1a + 2; // v18: real limit, since y goes only from 2
 
-    if (match1 < 3)
+    // --bff--    --tff--
+    // 0t         0t
+    // 1b: prvpf  1b: mapp
+    // 2t: mapp   2t: curf,prvpf
+    // 3b: curf
+    
+    if (match1 < 3) // match1: input frame; match2: candidate frame
     {
-      curf = srcp + ((3 - field)*src_pitch);
-      mapp = mapp + ((field == 1 ? 1 : 2)*map_pitch);
+      curf = srcp + ((3 - field)*src_pitch); // row 3 for bff, row 2 for tff (current pixel with top neighbour pixel)
+      mapp = mapp + ((field == 1 ? 1 : 2)*map_pitch); // row 2 for bff, row 1 for tff
     }
     if (match1 == 0)
     {
       prvf_pitch = prv_pitch << 1;
       prvpf = prvp + ((field == 1 ? 1 : 2)*prv_pitch);
     }
-    else if (match1 == 1)
+    else if (match1 == 1) // default branch for 1st compare
     {
-      prvf_pitch = src_pitch << 1;
-      prvpf = srcp + ((field == 1 ? 1 : 2)*src_pitch);
+      prvf_pitch = src_pitch << 1; // 2x row pitch (cur frame)
+      prvpf = srcp + ((field == 1 ? 1 : 2)*src_pitch); // row 2 for bff, row 1 for tff (input frame)
     }
     else if (match1 == 2)
     {
@@ -1635,10 +1668,10 @@ int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame
       prvpf = nxtp + ((field == 1 ? 2 : 1)*nxt_pitch);
       mapp = mapp + ((field == 1 ? 2 : 1)*map_pitch);
     }
-    if (match2 == 0)
+    if (match2 == 0) // default branch for 1st compare
     {
-      nxtf_pitch = prv_pitch << 1;
-      nxtpf = prvp + ((field == 1 ? 1 : 2)*prv_pitch);
+      nxtf_pitch = prv_pitch << 1; // 2x row pitch (next frame)
+      nxtpf = prvp + ((field == 1 ? 1 : 2)*prv_pitch); // row 2 for bff, row 1 for tff (previous frame)
     }
     else if (match2 == 1)
     {
@@ -1661,31 +1694,41 @@ int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame
       nxtpf = nxtp + ((field == 1 ? 2 : 1)*nxt_pitch);
     }
 
-    const pixel_t* prvppf = prvpf - prvf_pitch;
+    const pixel_t* prvppf = prvpf - prvf_pitch; // 2x pitch
     const pixel_t* prvnf = prvpf + prvf_pitch;
     const pixel_t* prvnnf = prvnf + prvf_pitch;
 
-    const pixel_t* curpf = curf - curf_pitch;
+    const pixel_t* curpf = curf - curf_pitch; // 2x pitch
     const pixel_t* curnf = curf + curf_pitch;
 
-    const pixel_t* nxtppf = nxtpf - nxtf_pitch;
+    const pixel_t* nxtppf = nxtpf - nxtf_pitch; // 2x pitch
     const pixel_t* nxtnf = nxtpf + nxtf_pitch;
     const pixel_t* nxtnnf = nxtnf + nxtf_pitch;
 
-    map_pitch <<= 1;
-    uint8_t* mapn = mapp + map_pitch;
+    map_pitch <<= 1; // 2x pitch
+    uint8_t* mapn = mapp + map_pitch; // mapp + 2 rows
+
+    // example: bff + compare(c, p)
+    // frm:       p            c        n
+    // 0t    p0t=nxtppf | c0t=prvppf | 
+    // 1b    p1b=       | c1b=curpf  | 
+    // 2t    p2t=nxtpf  | c2t=prvpf  | 
+    // 3b    p3b=       | c3b=curf   | 
+    // 4t    p4t=nxtnf  | c4t=prvnf  | 
+    // 5b    p5b=       | c5b=curnf  | 
+    // 6t    p6t=nxtnnf | c6t=prvnnf | 
 
     // back to byte pointers
     if (vi.IsPlanar())
     {
-      if ((match1 >= 3 && field == 1) || (match1 < 3 && field != 1))
-        buildDiffMapPlane_Planar<pixel_t>(
+      if ((match1 >= 3 && field == 1) || (match1 < 3 && field != 1)) // default branch for 1st compare
+        buildDiffMapPlane_Planar<pixel_t>( // mapp = |prvpf - nxtpf| (a map of abs diff) (half height (see tfmplanar.cpp)); value: {0,1,3,5}
           reinterpret_cast<const uint8_t*>(prvpf),
           reinterpret_cast<const uint8_t*>(nxtpf),
-          mapp,
+          mapp, // output
           prvf_pitch * sizeof(pixel_t),
           nxtf_pitch * sizeof(pixel_t),
-          map_pitch, Height, Width, tpitch_current, bits_per_pixel);
+          map_pitch, Height, Width, tpitch_current, bits_per_pixel, env);
       else
         buildDiffMapPlane_Planar<pixel_t>(
           reinterpret_cast<const uint8_t*>(prvnf),
@@ -1693,48 +1736,51 @@ int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame
           mapn,
           prvf_pitch * sizeof(pixel_t),
           nxtf_pitch * sizeof(pixel_t),
-          map_pitch, Height, Width, tpitch_current, bits_per_pixel);
+          map_pitch, Height, Width, tpitch_current, bits_per_pixel, env);
     }
     else
     { // YUY2
       if constexpr (sizeof(pixel_t) == 1) {
         if ((match1 >= 3 && field == 1) || (match1 < 3 && field != 1))
-          buildDiffMapPlaneYUY2(prvpf, nxtpf, mapp, prvf_pitch, nxtf_pitch, map_pitch, Height, Width, tpitch_current);
+          buildDiffMapPlaneYUY2(prvpf, nxtpf, mapp, prvf_pitch, nxtf_pitch, map_pitch, Height, Width, tpitch_current, env);
         else
-          buildDiffMapPlaneYUY2(prvnf, nxtnf, mapn, prvf_pitch, nxtf_pitch, map_pitch, Height, Width, tpitch_current);
+          buildDiffMapPlaneYUY2(prvnf, nxtnf, mapn, prvf_pitch, nxtf_pitch, map_pitch, Height, Width, tpitch_current, env);
       }
     }
 
     const int Const23 = 23 << (bits_per_pixel - 8);
     const int Const42 = 42 << (bits_per_pixel - 8);
 
-    if (field == 0) {
+    if (field == 0) { // bff
     // TFM 1436
     // almost the same as in TFM 1144
-      for (int y = 2; y < Height - 2; y += 2) {
+      for (int y = 2; y < Height - 2; y += 2) { // traverse top field rows
         if ((y < y0a) || noBandExclusion || (y > y1a))
         {
-          for (int x = startx; x < stopx; x += incl)
+          for (int x = startx; x < stopx; x += incl) // x++
           {
+            // eax = |c2t-p2t|*8 + |c4t-p4t| (p/c: frame; 4: row index; t/b: field)
+            //   eax:   map[C] | map[d]
+            // 6-bit: b5 b4 b3 | b2 b1 b0
             int eax = (mapp[x] << 3) + mapn[x]; // diff from prev asm block (at buildDiffMapPlane2): <<3 instead of <<2
-            if ((eax & 0xFF) == 0)
+            if ((eax & 0xFF) == 0) // eax==0
               continue;
 
-            int a_curr = curpf[x] + (curf[x] << 2) + curnf[x];
-            int a_prev = 3 * (prvpf[x] + prvnf[x]);
-            int diff_p_c = abs(a_prev - a_curr);
+            int a_curr = curpf[x] + (curf[x] << 2) + curnf[x]; // a_curr=c1b+4*c3b+c5b
+            int a_prev = 3 * (prvpf[x] + prvnf[x]); // a_prev=3*(c2t+c4t)
+            int diff_p_c = abs(a_prev - a_curr); // diff_p_c=blur(bob(topfield))-blur(bob(bottomfield)) (field differencing to check for combed artifact)
             if (diff_p_c > Const23) {
-              if ((eax & 9) != 0) // diff from previous similar asm block: condition
+              if ((eax & 9) != 0) // diff from previous similar asm block: condition; 0b1001
                 accumPc += diff_p_c;
               if (diff_p_c > Const42) {
-                if ((eax & 18) != 0) // diff: &18 instead of &10
+                if ((eax & 18) != 0) // diff: &18 instead of &10; 0b10010
                   accumPm += diff_p_c;
-                if ((eax & 36) != 0) // diff: new condition and accumulator
+                if ((eax & 36) != 0) // diff: new condition and accumulator; 0b100100
                   accumPml += diff_p_c;
               }
             }
-            int a_next = 3 * (nxtpf[x] + nxtnf[x]);
-            int diff_n_c = abs(a_next - a_curr);
+            int a_next = 3 * (nxtpf[x] + nxtnf[x]); // a_next=3*(p2t+p4t)
+            int diff_n_c = abs(a_next - a_curr); // diff_n_c=blur(bob(topfield_prev))-blur(bob(bottomfield))
             if (diff_n_c > Const23) {
               if ((eax & 9) != 0) // diff from previous similar asm block: condition
                 accumNc += diff_n_c;
@@ -1747,7 +1793,7 @@ int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame
             }
 
             // additional difference from TFM 1144
-            if ((eax & 56) != 0) {
+            if ((eax & 56) != 0) { // 0b111000, >= 16?
 
               int a_prev = prvppf[x] + (prvpf[x] << 2) + prvnf[x];
               int a_curr = 3 * (curpf[x] + curf[x]);
@@ -1774,9 +1820,9 @@ int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame
                     accumNml += diff_n_c;
                 }
               }
-            }
-          }
-        } // if
+            } // additional diff
+          } // traverse x
+        } // if inside y range
 
         mapp += map_pitch;
         prvpf += prvf_pitch;
@@ -1790,9 +1836,9 @@ int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame
 
         prvppf += prvf_pitch;
         nxtppf += nxtf_pitch;
-      }
-    }
-    else {
+      } // traverse y
+    } // if bff
+    else { // tff
       // TFM 1633
       // almost the same as in TFM 1436 (field==0= case)
       // differences are after eax&56 block, see later
@@ -2296,7 +2342,13 @@ int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame
 #endif
   }
 
-  const unsigned int Const500 = 500 << (bits_per_pixel - 8);
+  // accumPc: p_intra_L; accumPm: p_intra_M; accumPml: p_intra_H
+  // accumNc: p_inter_L; accumNm: p_intra_M; accumNml: p_inter_H
+  const int Const500 = 500 << (bits_per_pixel - 8);
+  // if p_intra_M < 500 and p_inter_M < 500 and \
+  //    (p_intra_H >= 500 or p_inter_H >= 500) and \
+  //    max(p_intra_H, p_inter_H) > 3*min(p_intra_H, p_inter_H):
+  //    p_intra_M, p_inter_M = p_intra_H, p_inter_H
   if (accumPm < Const500 && accumNm < Const500 && (accumPml >= Const500 || accumNml >= Const500) &&
     std::max(accumPml, accumNml) > 3 * std::min(accumPml, accumNml))
   {
@@ -2308,7 +2360,7 @@ int TFM::compareFieldsSlow2_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame
   // Or else we should treat them as int64 and act upon them outside
   const double factor = 1.0 / (1 << (bits_per_pixel - 8));
 
-  norm1 = (int)((accumPc / 6.0 * factor) + 0.5);
+  norm1 = (int)((accumPc / 6.0 * factor) + 0.5); // 6 pels, so divide by 6; rounding
   norm2 = (int)((accumNc / 6.0 * factor) + 0.5);
   mtn1 = (int)((accumPm / 6.0 * factor) + 0.5);
   mtn2 = (int)((accumNm / 6.0 * factor) + 0.5);
@@ -2542,9 +2594,10 @@ bool TFM::checkSceneChange_core(PVideoFrame &prv, PVideoFrame &src, PVideoFrame 
 }
 
 void TFM::createWeaveFrame(PVideoFrame &dst, PVideoFrame &prv, PVideoFrame &src,
-  PVideoFrame &nxt, int match, int &cfrm, IScriptEnvironment * env, const VideoInfo &vi) const
+  PVideoFrame &nxt, IScriptEnvironment *env, int match, int &cfrm, const VideoInfo &vi)
 {
-  if (cfrm == match)
+  // cfrm: dfrm variable; match: better-matched frame
+  if (cfrm == match) // cfrm==-20 for default; match=={0,1,2}
     return;
 
   const int np = vi.IsYUY2() || vi.IsY() ? 1 : 3;
@@ -2552,48 +2605,52 @@ void TFM::createWeaveFrame(PVideoFrame &dst, PVideoFrame &prv, PVideoFrame &src,
   for (int b = 0; b < np; ++b)
   {
     const int plane = planes[b];
-    if (match == 0)
+    if (match == 0) // p as matched frame
     {
-      BitBlt(dst->GetWritePtr(plane) + (1 - field)*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
+      // void BitBlt(BYTE* dstp, int dst_pitch, const BYTE* srcp, int src_pitch, int row_size, int height)
+      // field==0 for bff, field==1 for tff
+      // create bottom field (1 row) (use frame c)
+      env->BitBlt(dst->GetWritePtr(plane) + (1 - field)*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
         src->GetReadPtr(plane) + (1 - field)*src->GetPitch(plane), src->GetPitch(plane) << 1,
         src->GetRowSize(plane), src->GetHeight(plane) >> 1);
-      BitBlt(dst->GetWritePtr(plane) + field*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
+      // create top field (1 row) (use frame p)
+      env->BitBlt(dst->GetWritePtr(plane) + field*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
         prv->GetReadPtr(plane) + field*prv->GetPitch(plane), prv->GetPitch(plane) << 1,
         prv->GetRowSize(plane), prv->GetHeight(plane) >> 1);
     }
-    else if (match == 1)
+    else if (match == 1) // c as matched frame
     {
-      BitBlt(dst->GetWritePtr(plane), dst->GetPitch(plane), src->GetReadPtr(plane),
+      env->BitBlt(dst->GetWritePtr(plane), dst->GetPitch(plane), src->GetReadPtr(plane),
         src->GetPitch(plane), src->GetRowSize(plane), src->GetHeight(plane));
     }
-    else if (match == 2)
+    else if (match == 2) // n as matched frame
     {
-      BitBlt(dst->GetWritePtr(plane) + (1 - field)*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
+      env->BitBlt(dst->GetWritePtr(plane) + (1 - field)*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
         src->GetReadPtr(plane) + (1 - field)*src->GetPitch(plane), src->GetPitch(plane) << 1,
         src->GetRowSize(plane), src->GetHeight(plane) >> 1);
-      BitBlt(dst->GetWritePtr(plane) + field*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
+      env->BitBlt(dst->GetWritePtr(plane) + field*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
         nxt->GetReadPtr(plane) + field*nxt->GetPitch(plane), nxt->GetPitch(plane) << 1,
         nxt->GetRowSize(plane), nxt->GetHeight(plane) >> 1);
     }
     else if (match == 3)
     {
-      BitBlt(dst->GetWritePtr(plane) + field*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
+      env->BitBlt(dst->GetWritePtr(plane) + field*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
         src->GetReadPtr(plane) + field*src->GetPitch(plane), src->GetPitch(plane) << 1,
         src->GetRowSize(plane), src->GetHeight(plane) >> 1);
-      BitBlt(dst->GetWritePtr(plane) + (1 - field)*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
+      env->BitBlt(dst->GetWritePtr(plane) + (1 - field)*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
         prv->GetReadPtr(plane) + (1 - field)*prv->GetPitch(plane), prv->GetPitch(plane) << 1,
         prv->GetRowSize(plane), prv->GetHeight(plane) >> 1);
     }
     else if (match == 4)
     {
-      BitBlt(dst->GetWritePtr(plane) + field*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
+      env->BitBlt(dst->GetWritePtr(plane) + field*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
         src->GetReadPtr(plane) + field*src->GetPitch(plane), src->GetPitch(plane) << 1,
         src->GetRowSize(plane), src->GetHeight(plane) >> 1);
-      BitBlt(dst->GetWritePtr(plane) + (1 - field)*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
+      env->BitBlt(dst->GetWritePtr(plane) + (1 - field)*dst->GetPitch(plane), dst->GetPitch(plane) << 1,
         nxt->GetReadPtr(plane) + (1 - field)*nxt->GetPitch(plane), nxt->GetPitch(plane) << 1,
         nxt->GetRowSize(plane), nxt->GetHeight(plane) >> 1);
     }
-    //else env->ThrowError("TFM:  an unknown error occurred (no such match!)");
+    else env->ThrowError("TFM:  an unknown error occurred (no such match!)");
   }
   cfrm = match;
 }
@@ -2654,7 +2711,7 @@ void TFM::putHint_core(PVideoFrame &dst, int match, int combed, bool d2vfilm)
 template<typename pixel_t>
 void TFM::buildDiffMapPlane2(const uint8_t *prvp, const uint8_t *nxtp,
   uint8_t *dstp, int prv_pitch, int nxt_pitch, int dst_pitch, int Height,
-  int Width, int bits_per_pixel) const
+  int Width, int bits_per_pixel, IScriptEnvironment *env)
 {
   const bool YUY2_LumaOnly = vi.IsYUY2() && !mChroma;
   do_buildABSDiffMask2<pixel_t>(prvp, nxtp, dstp, prv_pitch, nxt_pitch, dst_pitch, Width, Height, YUY2_LumaOnly, cpuFlags, bits_per_pixel);
@@ -2663,24 +2720,27 @@ void TFM::buildDiffMapPlane2(const uint8_t *prvp, const uint8_t *nxtp,
 // instantiate
 template void TFM::buildDiffMapPlane2<uint8_t>(const uint8_t* prvp, const uint8_t* nxtp,
   uint8_t* dstp, int prv_pitch, int nxt_pitch, int dst_pitch, int Height,
-  int Width, int bits_per_pixel) const;
+  int Width, int bits_per_pixel, IScriptEnvironment* env);
 template void TFM::buildDiffMapPlane2<uint16_t>(const uint8_t* prvp, const uint8_t* nxtp,
   uint8_t* dstp, int prv_pitch, int nxt_pitch, int dst_pitch, int Height,
-  int Width, int bits_per_pixel) const;
+  int Width, int bits_per_pixel, IScriptEnvironment* env);
 
 template<typename pixel_t>
 void TFM::buildABSDiffMask(const uint8_t *prvp, const uint8_t *nxtp,
-  int prv_pitch, int nxt_pitch, int tpitch, int width, int height) const
+  int prv_pitch, int nxt_pitch, int tpitch, int width, int height,
+  IScriptEnvironment *env)
 {
   const bool YUY2_LumaOnly = vi.IsYUY2() && !mChroma;
-  do_buildABSDiffMask<pixel_t>(prvp, nxtp, tbuffer.get(), prv_pitch, nxt_pitch, tpitch, width, height, YUY2_LumaOnly, cpuFlags);
+  do_buildABSDiffMask<pixel_t>(prvp, nxtp, tbuffer, prv_pitch, nxt_pitch, tpitch, width, height, YUY2_LumaOnly, cpuFlags);
 }
 
 // instantiate
 template void TFM::buildABSDiffMask<uint8_t>(const uint8_t* prvp, const uint8_t* nxtp,
-  int prv_pitch, int nxt_pitch, int tpitch, int width, int height) const;
+  int prv_pitch, int nxt_pitch, int tpitch, int width, int height,
+  IScriptEnvironment* env);
 template void TFM::buildABSDiffMask<uint16_t>(const uint8_t* prvp, const uint8_t* nxtp,
-  int prv_pitch, int nxt_pitch, int tpitch, int width, int height) const;
+  int prv_pitch, int nxt_pitch, int tpitch, int width, int height,
+  IScriptEnvironment* env);
 
 
 AVSValue __cdecl Create_TFM(AVSValue args, void* user_data, IScriptEnvironment* env)
@@ -2722,16 +2782,19 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
   cthresh(_cthresh), MI(_MI), chroma(_chroma), blockx(_blockx), blocky(_blocky), y0(_y0),
   y1(_y1), d2v(_d2v), ovrDefault(_ovrDefault), flags(_flags), scthresh(_scthresh), micout(_micout),
   micmatching(_micmatching), trimIn(_trimIn), usehints(_usehints), metric(_metric),
-  batch(_batch), ubsco(_ubsco), mmsco(_mmsco), opt(_opt), cArray(nullptr, nullptr), tbuffer(nullptr, nullptr)
+  batch(_batch), ubsco(_ubsco), mmsco(_mmsco), opt(_opt)
 {
-
-
+  cArray = setArray = moutArray = moutArrayE = NULL;
+  ovrArray = outArray = NULL;
+  d2vfilmarray = NULL;
+  tbuffer = NULL;
+  trimArray = NULL;
   map = cmask = NULL;
-  int z, w, q = 0, b, i, count, last, fieldt, firstLine, qt;
+  int z, w, q, b, i, count, last, fieldt, firstLine, qt;
   int countOvrS, countOvrM;
   char linein[1024];
   char *linep, *linet;
-  FILE *f = nullptr;
+  FILE *f = NULL;
 
   has_at_least_v8 = true;
   try { env->CheckVersion(8); }
@@ -2740,11 +2803,6 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
   cpuFlags = env->GetCPUFlags();
   if (opt == 0) cpuFlags = 0;
 
-   if (vi.IsY())
-    chroma = false;
-
-  if (vi.BitsPerComponent() > 16)
-    env->ThrowError("TFM:  only 8-16 bit formats supported!");
   if (!vi.IsYUV())
     env->ThrowError("TFM:  YUV data only!");
   if (vi.height & 1 || vi.width & 1)
@@ -2793,12 +2851,12 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
 
   lastMatch.frame = lastMatch.field = lastMatch.combed = lastMatch.match = -20;
   nfrms = vi.num_frames - 1;
-  f = nullptr;
+  f = NULL;
   mode_origSaved = mode;
   PP_origSaved = PP;
   MI_origSaved = MI;
   d2vpercent = -20.00f;
-  vidCount = 0;
+  vidCount = setArraySize = 0;
 
   xhalf = blockx >> 1;
   yhalf = blocky >> 1;
@@ -2821,9 +2879,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
   if (mode == 1 || mode == 2 || mode == 3 || mode == 5 || mode == 6 || mode == 7 ||
     PP > 0 || micout > 0 || micmatching > 0)
   {
-    // unique_ptr!
-    cArray = decltype(cArray) ((int *)_aligned_malloc((((vi.width + xhalf) >> xshift) + 1)*(((vi.height + yhalf) >> yshift) + 1) * 4 * sizeof(int), 16), &_aligned_free);
-;
+    cArray = (int *)_aligned_malloc((((vi.width + xhalf) >> xshift) + 1)*(((vi.height + yhalf) >> yshift) + 1) * 4 * sizeof(int), 16);
     if (!cArray) env->ThrowError("TFM:  malloc failure (cArray)!");
     cmask = new PlanarFrame(vi, true, cpuFlags);
   }
@@ -2837,18 +2893,20 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
     xhalf *= 2;
     ++xshift;
   }
-  if (d2v.size())
+  if (*d2v)
   {
     parseD2V(env);
-    trimArray.resize(0);
+    if (trimArray != NULL)
+    {
+      free(trimArray);
+      trimArray = NULL;
+    }
   }
   order_origSaved = order;
   field_origSaved = fieldO = field;
   if (fieldO == -1)
   {
-    if (order == -1) {
-      fieldO = child->GetParity(0) ? 1 : 0;
-    }
+    if (order == -1) fieldO = child->GetParity(0) ? 1 : 0;
     else fieldO = order;
   }
   tpitchy = tpitchuv = -20;
@@ -2866,20 +2924,28 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
     tpitchy = AlignNumber((vi.width << 1), ALIGN_BUF);
   }
   // 16 would be is enough for sse2 but maybe we'll do AVX2?
-  // unique_ptr!
-  tbuffer = decltype(tbuffer) ((uint8_t*)_aligned_malloc((vi.height >> 1) * tpitchy, ALIGN_BUF), &_aligned_free);
+  tbuffer = (uint8_t*)_aligned_malloc((vi.height >> 1) * tpitchy, ALIGN_BUF);
   if (tbuffer == NULL)
     env->ThrowError("TFM:  malloc failure (tbuffer)!");
   mode7_field = field;
-  if (input.size())
+  if (*input)
   {
     bool d2vmarked, micmarked;
-    if ((f = tivtc_fopen(input.c_str(), "r")) != NULL)
+    if ((f = fopen(input, "r")) != NULL)
     {
-      ovrArray.resize(vi.num_frames, 255);
-      if (d2vfilmarray.size() == 0)
+      ovrArray = (uint8_t *)malloc(vi.num_frames * sizeof(uint8_t));
+      if (ovrArray == NULL)
       {
-        d2vfilmarray.resize(vi.num_frames + 1, 0);
+        fclose(f);
+        f = NULL;
+        env->ThrowError("TFM:  malloc failure (ovrArray)!");
+      }
+      memset(ovrArray, 255, vi.num_frames);
+      if (d2vfilmarray == NULL)
+      {
+        d2vfilmarray = (uint8_t *)malloc((vi.num_frames + 1) * sizeof(uint8_t));
+        if (d2vfilmarray == NULL) env->ThrowError("TFM:  malloc failure (d2vfilmarray)!");
+        memset(d2vfilmarray, 0, (vi.num_frames + 1) * sizeof(uint8_t));
       }
       fieldt = fieldO;
       firstLine = 0;
@@ -2889,7 +2955,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
           fieldt == 0 ? "bottom" : "top");
         OutputDebugString(buf);
       }
-      while (fgets(linein, 1024, f) != nullptr)
+      while (fgets(linein, 1024, f) != NULL)
       {
         if (linein[0] == 0 || linein[0] == '\n' || linein[0] == '\r' || linein[0] == ';' || linein[0] == '#')
           continue;
@@ -2926,7 +2992,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
             if (tempCrc != m && !batch)
             {
               fclose(f);
-              f = nullptr;
+              f = NULL;
               env->ThrowError("TFM:  crc32 in input file does not match that of the current clip (%#x vs %#x)!",
                 m, tempCrc);
             }
@@ -2950,7 +3016,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
             if (z<0 || z>nfrms)
             {
               fclose(f);
-              f = nullptr;
+              f = NULL;
               env->ThrowError("TFM:  input file error (out of range or non-ascending frame #)!");
             }
             linep = linein;
@@ -2971,7 +3037,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
               else
               {
                 fclose(f);
-                f = nullptr;
+                f = NULL;
                 env->ThrowError("TFM:  input file error (invalid match specifier)!");
               }
               linep++;
@@ -2986,7 +3052,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
                 else
                 {
                   fclose(f);
-                  f = nullptr;
+                  f = NULL;
                   env->ThrowError("TFM:  input file error (invalid specifier)!");
                 }
               }
@@ -3032,16 +3098,16 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
         }
       }
       fclose(f);
-      f = nullptr;
+      f = NULL;
     }
     else env->ThrowError("TFM:  input file error (could not open file)!");
   }
-  if (ovr.size())
+  if (*ovr)
   {
-    if ((f = tivtc_fopen(ovr.c_str(), "r")) != nullptr)
+    if ((f = fopen(ovr, "r")) != NULL)
     {
       countOvrS = countOvrM = 0;
-      while (fgets(linein, 1024, f) != nullptr)
+      while (fgets(linein, 1024, f) != 0)
       {
         if (linein[0] == 0 || linein[0] == '\n' || linein[0] == '\r' || linein[0] == ';' || linein[0] == '#')
           continue;
@@ -3052,9 +3118,8 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
         else ++countOvrM;
       }
       fclose(f);
-      f = nullptr;
-      if (ovrDefault != 0 && ovrArray.size())
-
+      f = NULL;
+      if (ovrDefault != 0 && ovrArray != NULL)
       {
         if (ovrDefault == 1) q = 0;
         else if (ovrDefault == 2) q = COMBED;
@@ -3076,11 +3141,16 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
       {
         ++countOvrS;
         countOvrS *= 4;
-        setArray.resize(countOvrS, 0xffffffff);
+        setArray = (int *)malloc(countOvrS * sizeof(int));
+        if (setArray == NULL) env->ThrowError("TFM:  malloc failure (setArray)!");
+        memset(setArray, 255, countOvrS * sizeof(int));
+        setArraySize = countOvrS;
       }
-      if (countOvrM > 0 && ovrArray.size() == 0)
+      if (countOvrM > 0 && ovrArray == NULL)
       {
-        ovrArray.resize(vi.num_frames, 255);
+        ovrArray = (uint8_t *)malloc(vi.num_frames * sizeof(unsigned char));
+        if (ovrArray == NULL) env->ThrowError("TFM:  malloc failure (ovrArray)!");
+        memset(ovrArray, 255, vi.num_frames);
         if (ovrDefault != 0)
         {
           if (ovrDefault == 1) q = 0;
@@ -3097,7 +3167,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
       fieldt = fieldO;
       firstLine = 0;
       i = 0;
-      if ((f = tivtc_fopen(ovr.c_str(), "r")) != nullptr)
+      if ((f = fopen(ovr, "r")) != NULL)
       {
         if (debug)
         {
@@ -3105,7 +3175,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
             fieldt == 0 ? "bottom" : "top");
           OutputDebugString(buf);
         }
-        while (fgets(linein, 1024, f) != nullptr)
+        while (fgets(linein, 1024, f) != NULL)
         {
           if (linein[0] == 0 || linein[0] == '\n' || linein[0] == '\r' || linein[0] == ';' || linein[0] == '#')
             continue;
@@ -3143,7 +3213,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
               if (z<0 || z>nfrms || z <= last)
               {
                 fclose(f);
-                f = nullptr;
+                f = NULL;
                 env->ThrowError("TFM:  ovr file error (out of range or non-ascending frame #)!");
               }
               linep = linein;
@@ -3162,7 +3232,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
                 else
                 {
                   fclose(f);
-                  f = nullptr;
+                  f = NULL;
                   env->ThrowError("TFM:  ovr file error (invalid match specifier)!");
                 }
                 if (fieldt != fieldO)
@@ -3183,7 +3253,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
               if (z<0 || z>nfrms)
               {
                 fclose(f);
-                f = nullptr;
+                f = NULL;
                 env->ThrowError("TFM:  ovr file error (out of range or non-ascending frame #)!");
               }
               linep = linein;
@@ -3197,7 +3267,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
                 else
                 {
                   fclose(f);
-                  f = nullptr;
+                  f = NULL;
                   env->ThrowError("TFM:  ovr file error (invalid symbol)!");
                 }
                 ovrArray[z] &= 0xDF;
@@ -3217,7 +3287,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
               if (z<0 || z>nfrms)
               {
                 fclose(f);
-                f = nullptr;
+                f = NULL;
                 env->ThrowError("TFM:  ovr input error (out of range frame #)!");
               }
               linep = linein;
@@ -3235,25 +3305,25 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
                   if (q == 102 && b != 0 && b != 1 && b != -1)
                   {
                     fclose(f);
-                    f = nullptr;
+                    f = NULL;
                     env->ThrowError("TFM:  ovr input error (bad field value)!");
                   }
                   else if (q == 111 && b != 0 && b != 1 && b != -1)
                   {
                     fclose(f);
-                    f = nullptr;
+                    f = NULL;
                     env->ThrowError("TFM:  ovr input error (bad order value)!");
                   }
                   else if (q == 109 && (b < 0 || b > 7))
                   {
                     fclose(f);
-                    f = nullptr;
+                    f = NULL;
                     env->ThrowError("TFM:  ovr input error (bad mode value)!");
                   }
                   else if (q == 80 && (b < 0 || b > 7))
                   {
                     fclose(f);
-                    f = nullptr;
+                    f = NULL;
                     env->ThrowError("TFM:  ovr input error (bad PP value)!");
                   }
                   setArray[i] = q; ++i;
@@ -3276,7 +3346,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
               if (z<0 || z>nfrms || w<0 || w>nfrms || w < z || z <= last)
               {
                 fclose(f);
-                f = nullptr;
+                f = NULL;
                 env->ThrowError("TFM:  input file error (out of range or non-ascending frame #)!");
               }
               linep = linein;
@@ -3300,7 +3370,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
                     else
                     {
                       fclose(f);
-                      f = nullptr;
+                      f = NULL;
                       env->ThrowError("TFM:  input file error (invalid match specifier)!");
                     }
                     if (fieldt != fieldO)
@@ -3336,7 +3406,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
                   else
                   {
                     fclose(f);
-                    f = nullptr;
+                    f = NULL;
                     env->ThrowError("TFM:  input file error (invalid match specifier)!");
                   }
                   if (fieldt != fieldO)
@@ -3363,7 +3433,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
               if (z<0 || z>nfrms || w<0 || w>nfrms || w < z)
               {
                 fclose(f);
-                f = nullptr;
+                f = NULL;
                 env->ThrowError("TFM:  input file error (out of range or non-ascending frame #)!");
               }
               linep = linein;
@@ -3382,7 +3452,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
                     else
                     {
                       fclose(f);
-                      f = nullptr;
+                      f = NULL;
                       env->ThrowError("TFM:  input file error (invalid symbol)!");
                     }
                     ovrArray[z + count] &= 0xDF;
@@ -3419,7 +3489,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
                   else
                   {
                     fclose(f);
-                    f = nullptr;
+                    f = NULL;
                     env->ThrowError("TFM:  input file error (invalid symbol)!");
                   }
                   while (z <= w)
@@ -3445,7 +3515,7 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
               if (z<0 || z>nfrms || w<0 || w>nfrms || w < z)
               {
                 fclose(f);
-                f = nullptr;
+                f = NULL;
                 env->ThrowError("TFM: ovr input error (invalid frame range)!");
               }
               linep = linein;
@@ -3463,25 +3533,25 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
                   if (q == 102 && b != 0 && b != 1 && b != -1)
                   {
                     fclose(f);
-                    f = nullptr;
+                    f = NULL;
                     env->ThrowError("TFM:  ovr input error (bad field value)!");
                   }
                   else if (q == 111 && b != 0 && b != 1 && b != -1)
                   {
                     fclose(f);
-                    f = nullptr;
+                    f = NULL;
                     env->ThrowError("TFM:  ovr input error (bad order value)!");
                   }
                   else if (q == 109 && (b < 0 || b > 7))
                   {
                     fclose(f);
-                    f = nullptr;
+                    f = NULL;
                     env->ThrowError("TFM:  ovr input error (bad mode value)!");
                   }
                   else if (q == 80 && (b < 0 || b > 7))
                   {
                     fclose(f);
-                    f = nullptr;
+                    f = NULL;
                     env->ThrowError("TFM:  ovr input error (bad PP value)!");
                   }
                   setArray[i] = q; ++i;
@@ -3494,57 +3564,65 @@ TFM::TFM(PClip _child, int _order, int _field, int _mode, int _PP, const char* _
           }
         }
         fclose(f);
-        f = nullptr;
+        f = NULL;
       }
       else env->ThrowError("TFM:  ovr file error (could not open file)!");
     }
     else env->ThrowError("TFM:  ovr input error (could not open ovr file)!");
   }
 emptyovr:
-  if (output.size())
+  if (*output)
   {
-    if ((f = tivtc_fopen(output.c_str(), "w")) != NULL)
+    if ((f = fopen(output, "w")) != NULL)
     {
 #ifdef _WIN32
-      _fullpath(outputFull, output.c_str(), MAX_PATH);
+      _fullpath(outputFull, output, MAX_PATH);
 #else
-      realpath(output.c_str(), outputFull);
+      realpath(output, outputFull);
 #endif
       calcCRC(child, 15, outputCrc, env);
       fclose(f);
-      f = nullptr;
-      outArray.resize(vi.num_frames, 0);
-      moutArray.resize(vi.num_frames, -1);
-
+      f = NULL;
+      outArray = (uint8_t *)malloc(vi.num_frames * sizeof(unsigned char));
+      if (outArray == NULL)
+        env->ThrowError("TFM:  malloc failure (outArray, output)!");
+      memset(outArray, 0, vi.num_frames);
+      moutArray = (int *)malloc(vi.num_frames * sizeof(int));
+      if (moutArray == NULL)
+        env->ThrowError("TFM:  malloc failure (moutArray, output)!");
+      for (int i = 0; i < vi.num_frames; ++i) moutArray[i] = -1;
       if (micout > 0)
       {
         int sn = micout == 1 ? 3 : 5;
-        moutArrayE.resize(vi.num_frames* sn, -20);
+        moutArrayE = (int*)malloc(vi.num_frames*sn * sizeof(int));
+        if (moutArrayE == NULL)
+          env->ThrowError("TFM:  malloc failure (moutArrayE)!");
+        for (int i = 0; i < sn*vi.num_frames; ++i) moutArrayE[i] = -20;
       }
     }
     else env->ThrowError("TFM:  output file error (cannot create file)!");
   }
-  if (outputC.size())
+  if (*outputC)
   {
-    if ((f = tivtc_fopen(outputC.c_str(), "w")) != NULL)
+    if ((f = fopen(outputC, "w")) != NULL)
     {
 #ifdef _WIN32
-      _fullpath(outputCFull, outputC.c_str(), MAX_PATH);
+      _fullpath(outputCFull, outputC, MAX_PATH);
 #else
-      realpath(outputC.c_str(), outputCFull);
+      realpath(outputC, outputCFull);
 #endif
       fclose(f);
-      f = nullptr;
-      if (outArray.size() == 0)
+      f = NULL;
+      if (outArray == NULL)
       {
-        outArray.resize(vi.num_frames, 0);
+        outArray = (uint8_t *)malloc(vi.num_frames * sizeof(unsigned char));
+        if (outArray == NULL)
+          env->ThrowError("TFM:  malloc failure (outArray, outputC)!");
+        memset(outArray, 0, vi.num_frames);
       }
     }
     else env->ThrowError("TFM:  outputC file error (cannot create file)!");
   }
-  /// Vapoursynth comment:
-  /// attach the value of PP to the first frame? TDecimate uses this to do something in the constructor while processing the tfmIn file.
-  ///
   AVSValue tfmPassValue(PP);
   const char *varname = "TFMPPValue";
   env->SetVar(varname, tfmPassValue);
@@ -3555,17 +3633,22 @@ TFM::~TFM()
 {
   if (map) delete map;
   if (cmask) delete cmask;
-
-  if (outArray.size())
+  if (cArray != NULL) _aligned_free(cArray);
+  if (tbuffer != NULL) _aligned_free(tbuffer);
+  if (setArray != NULL) free(setArray);
+  if (ovrArray != NULL) free(ovrArray);
+  if (d2vfilmarray != NULL) free(d2vfilmarray);
+  if (trimArray != NULL) free(trimArray);
+  if (outArray != NULL)
   {
-    FILE *f = nullptr;
-    if (output.size())
+    FILE *f = NULL;
+    if (*output)
     {
-      if ((f = tivtc_fopen(outputFull, "w")) != NULL)
+      if ((f = fopen(outputFull, "w")) != NULL)
       {
         char tempBuf[40], tb2[40];
         int match, sn = micout == 1 ? 3 : 5;
-        if (moutArrayE.size())
+        if (moutArrayE)
         {
           for (int i = 0; i < sn*vi.num_frames; ++i)
           {
@@ -3587,12 +3670,12 @@ TFM::~TFM()
               else strcat(tempBuf, " -");
             }
             if (outArray[h] & FILE_D2V) strcat(tempBuf, " 1");
-            if (moutArray.size() && moutArray[h] != -1)
+            if (moutArray && moutArray[h] != -1)
             {
               sprintf(tb2, " [%d]", moutArray[h]);
               strcat(tempBuf, tb2);
             }
-            if (moutArrayE.size())
+            if (moutArrayE)
             {
               int th = h*sn;
               if (sn == 3) sprintf(tb2, " (%d %d %d)", moutArrayE[th + 0],
@@ -3608,12 +3691,12 @@ TFM::~TFM()
         }
         generateOvrHelpOutput(f);
         fclose(f);
-        f = nullptr;
+        f = NULL;
       }
     }
-    if (outputC.size())
+    if (*outputC)
     {
-      if ((f = tivtc_fopen(outputCFull, "w")) != nullptr)
+      if ((f = fopen(outputCFull, "w")) != NULL)
       {
         int count = 0, match;
         fprintf(f, "#TFM %s by tritical\n", VERSION);
@@ -3630,14 +3713,17 @@ TFM::~TFM()
         }
         if (count > cNum) fprintf(f, "%d,%d\n", nfrms - count + 1, nfrms);
         fclose(f);
-        f = nullptr;
+        f = NULL;
       }
     }
-    if (f != nullptr) fclose(f);
+    if (f != NULL) fclose(f);
+    free(outArray);
   }
+  if (moutArray != NULL) free(moutArray);
+  if (moutArrayE != NULL) free(moutArrayE);
 }
 
-void TFM::generateOvrHelpOutput(FILE *f) const
+void TFM::generateOvrHelpOutput(FILE *f)
 {
   int ccount = 0, mcount = 0, acount = 0;
   int ordert = order == -1 ? child->GetParity(0) : order;
