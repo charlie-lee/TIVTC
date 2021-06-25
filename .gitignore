@@ -277,3 +277,10 @@ __pycache__/
 
 # Cake -
 # tools/
+
+
+# tag files for emacs
+src/GRTAGS
+src/GTAGS
+src/GPATH
+src/TAGS
